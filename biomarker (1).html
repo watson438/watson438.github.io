@@ -1,0 +1,1265 @@
+<!DOCTYPE html>
+<html lang="ja" class="h-full overflow-hidden">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BioMarker Pro - コロニーカウンター</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* 画面全体のスクロールを完全に禁止 */
+    html, body {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* サイドバー専用のカスタムスクロールバー */
+    .sidebar-scroll::-webkit-scrollbar {
+      width: 5px;
+    }
+    .sidebar-scroll::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    .sidebar-scroll::-webkit-scrollbar-thumb {
+      background: rgba(100, 116, 139, 0.4);
+      border-radius: 4px;
+    }
+    .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.6);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col font-sans h-full">
+
+  <!-- ================= 1. 最上部ヘッダー (固定高さ / 決してスクロールしない) ================= -->
+  <header class="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between flex-shrink-0 z-40">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-emerald-500 flex items-center justify-center text-slate-950 font-black shadow-md shadow-cyan-500/20">
+        <i class="fa-solid fa-bullseye text-sm"></i>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-sm font-bold text-white tracking-wide">BioMarker Pro</h1>
+          <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60 uppercase">Lab Edition</span>
+        </div>
+        <p class="text-[10px] text-slate-400">6色独立集計・精密打点・番号連動チェックボックス</p>
+      </div>
+    </div>
+
+    <!-- カウント集計 & グローバル操作 -->
+    <div class="flex items-center gap-2 sm:gap-3">
+      <div class="bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-lg flex items-center gap-2">
+        <span class="text-xs text-slate-400">有効合計:</span>
+        <span id="header-total-valid" class="text-base font-black text-emerald-400 font-mono">0</span>
+        <span class="text-[11px] text-slate-500">/ 総数 <span id="header-total-all">0</span></span>
+      </div>
+
+      <div class="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700">
+        <button id="btn-undo" title="元に戻す (Ctrl+Z / Z)" class="px-2 py-1 rounded text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent text-xs transition flex items-center gap-1">
+          <i class="fa-solid fa-rotate-left"></i>
+          <span class="hidden md:inline">元に戻す</span>
+        </button>
+        <button id="btn-redo" title="やり直す (Ctrl+Y / Y)" class="px-2 py-1 rounded text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent text-xs transition flex items-center gap-1">
+          <i class="fa-solid fa-rotate-right"></i>
+          <span class="hidden md:inline">やり直す</span>
+        </button>
+      </div>
+
+      <button id="btn-export-csv" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-400 border border-slate-700 transition flex items-center gap-1.5">
+        <i class="fa-solid fa-file-csv"></i> <span class="hidden sm:inline">CSV保存</span>
+      </button>
+      <button id="btn-export-image" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white shadow-lg shadow-emerald-700/20 transition flex items-center gap-1.5">
+        <i class="fa-solid fa-download"></i> <span class="hidden sm:inline">結果画像保存</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= 2. メイン作業領域 (残り高さを100%埋める) ================= -->
+  <div class="flex-1 flex flex-row overflow-hidden relative min-h-0">
+
+    <!-- A. キャンバス表示エリア (左側) -->
+    <div id="viewport-container" class="flex-1 h-full relative overflow-hidden bg-slate-950 cursor-crosshair">
+      
+      <!-- 固定ツールバー (キャンバス左上に常駐し、スクロールや画面移動に一切影響を受けない) -->
+      <div class="absolute top-3 left-3 z-30 flex flex-col gap-2 max-w-[calc(100%-24px)] pointer-events-none">
+        
+        <!-- 上段：ファイル / モード / ズーム / 番号切替 -->
+        <div class="flex flex-wrap items-center gap-1.5 pointer-events-auto bg-slate-900/95 backdrop-blur border border-slate-800 p-1.5 rounded-xl shadow-xl">
+          <label class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition">
+            <i class="fa-solid fa-folder-open text-[11px]"></i> 画像選択
+            <input type="file" id="input-image" accept="image/*" class="hidden">
+          </label>
+          <button id="btn-load-sample" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition">
+            <i class="fa-solid fa-vial text-[11px]"></i> サンプル
+          </button>
+
+          <div class="h-4 w-[1px] bg-slate-700 mx-0.5"></div>
+
+          <!-- 打点モード / 移動モード -->
+          <button id="tool-mark" class="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow transition">
+            <i class="fa-solid fa-pen-nib text-[11px]"></i> 打点
+          </button>
+          <button id="tool-pan" class="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent transition">
+            <i class="fa-solid fa-hand text-[11px]"></i> 移動 (Pan)
+          </button>
+
+          <div class="h-4 w-[1px] bg-slate-700 mx-0.5"></div>
+
+          <!-- 番号の表示/非表示 切り替えボタン -->
+          <button id="btn-toggle-numbers" title="番号ラベル表示/非表示 (Nキー)" class="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+            <i id="icon-toggle-numbers" class="fa-solid fa-eye text-emerald-400 text-[11px]"></i>
+            <span id="text-toggle-numbers">番号: ON</span>
+          </button>
+
+          <div class="h-4 w-[1px] bg-slate-700 mx-0.5"></div>
+
+          <!-- ズーム操作 -->
+          <button id="btn-zoom-out" title="縮小 (ホイール下)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-minus text-[10px]"></i>
+          </button>
+          <span id="zoom-text" class="w-11 text-center font-mono font-bold text-slate-200 text-xs">100%</span>
+          <button id="btn-zoom-in" title="拡大 (ホイール上)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-plus text-[10px]"></i>
+          </button>
+          <button id="btn-zoom-fit" title="全体表示" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-300">
+            全体
+          </button>
+        </div>
+
+        <!-- 下段：6色パレット & 点サイズ調整 -->
+        <div class="flex flex-wrap items-center gap-2 pointer-events-auto bg-slate-900/95 backdrop-blur border border-slate-800 p-1.5 rounded-xl shadow-xl text-xs">
+          <!-- 6色選択ボタン -->
+          <div class="flex items-center gap-1">
+            <span class="text-[11px] font-bold text-slate-400 mr-1">色:</span>
+            <div id="palette-buttons" class="flex items-center gap-1.5">
+              <!-- JSで赤・青・緑・黄・紫・黒の6ボタン生成 -->
+            </div>
+          </div>
+
+          <div class="h-4 w-[1px] bg-slate-700 mx-0.5"></div>
+
+          <!-- 点サイズ調整 -->
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] font-bold text-slate-400">点サイズ:</span>
+            <input type="range" id="input-point-size" min="2" max="32" value="8" class="w-20 accent-emerald-500 cursor-pointer">
+            <span id="label-point-size" class="font-mono text-emerald-400 font-bold w-5 text-right">8</span>
+            <span class="text-[10px] text-slate-500">px</span>
+            
+            <!-- プリセット -->
+            <div class="flex items-center gap-1 ml-1">
+              <button class="btn-preset-size px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300" data-size="4">極小</button>
+              <button class="btn-preset-size px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300" data-size="8">小</button>
+              <button class="btn-preset-size px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300" data-size="14">中</button>
+              <button class="btn-preset-size px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300" data-size="22">大</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 画像未読み込み時の中央ガイド -->
+      <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-6 text-center z-10">
+        <div class="w-16 h-16 rounded-2xl bg-slate-900 border-2 border-dashed border-slate-700 flex items-center justify-center text-2xl text-emerald-400 mb-3 shadow-xl">
+          <i class="fa-solid fa-cloud-arrow-up"></i>
+        </div>
+        <h3 class="text-sm font-bold text-slate-200">シャーレ画像をドラッグ＆ドロップ</h3>
+        <p class="text-xs text-slate-400 mt-1 max-w-sm">左上の「画像選択」または「サンプル」ボタンを押してコロニー計数を開始できます。</p>
+        <p class="text-[11px] text-slate-500 mt-3 font-mono">ショートカット: [Space]+ドラッグで移動 / ホイールで拡大縮小 / [N]で番号切替 / [Z]で戻す</p>
+      </div>
+
+      <!-- メイン描画キャンバス (100%絶対配置で固定) -->
+      <canvas id="main-canvas" class="w-full h-full block"></canvas>
+
+      <!-- 下部ステータスバー -->
+      <div class="absolute bottom-2 left-3 right-3 pointer-events-none flex items-center justify-between text-[11px] text-slate-400">
+        <div class="bg-slate-900/90 backdrop-blur px-2.5 py-1 rounded-lg border border-slate-800 flex items-center gap-3">
+          <span id="status-cursor">X: --, Y: --</span>
+          <span class="text-slate-700">|</span>
+          <span id="status-active-color">選択中: 赤</span>
+        </div>
+        <div class="hidden md:flex bg-slate-900/90 backdrop-blur px-2.5 py-1 rounded-lg border border-slate-800 text-slate-400 gap-2">
+          <span>右クリック: 直前の打点削除</span>
+          <span class="text-slate-700">|</span>
+          <span>Alt+ホイール: 点サイズ調整</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- B. サイドバー (右側固定幅330px / 内部のみスクロール) -->
+    <aside class="w-80 md:w-88 bg-slate-900/95 border-l border-slate-800 flex flex-col h-full flex-shrink-0 z-30 shadow-2xl">
+      
+      <!-- サイドバー上部: 6色タブ & 集計 -->
+      <div class="p-3 border-b border-slate-800 bg-slate-900 flex-shrink-0">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-bold text-slate-200 flex items-center gap-1.5 uppercase tracking-wide">
+            <i class="fa-solid fa-list-check text-emerald-400"></i> 色別カウンター
+          </span>
+          <span class="text-[10px] text-slate-400">1〜6キーで切替</span>
+        </div>
+
+        <!-- 6色タブグリッド (赤・青・緑・黄・紫・黒) -->
+        <div id="category-tabs" class="grid grid-cols-6 gap-1 p-1 bg-slate-950 rounded-xl border border-slate-800/80">
+          <!-- JSで動的生成 -->
+        </div>
+      </div>
+
+      <!-- 選択中カラーの情報 ＆ 一括操作ツールバー -->
+      <div class="px-3 py-2 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between flex-shrink-0">
+        <div>
+          <div class="flex items-center gap-1">
+            <span id="badge-color-preview" class="w-2.5 h-2.5 rounded-full inline-block"></span>
+            <input type="text" id="input-cat-name" class="bg-transparent hover:bg-slate-800 text-xs font-bold text-white px-1 py-0.5 rounded border border-transparent focus:border-slate-600 outline-none w-28" value="赤">
+          </div>
+          <div class="text-[10px] text-slate-400 mt-0.5">
+            有効: <span id="label-cat-valid" class="text-emerald-400 font-bold font-mono">0</span> / 総数 <span id="label-cat-total" class="font-mono">0</span>
+          </div>
+        </div>
+
+        <!-- 一括ON / 一括OFF / クリア -->
+        <div class="flex items-center gap-1">
+          <button id="btn-batch-check" title="すべてON" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-200 border border-slate-700 transition">
+            全ON
+          </button>
+          <button id="btn-batch-uncheck" title="すべてOFF" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-200 border border-slate-700 transition">
+            全OFF
+          </button>
+          <button id="btn-clear-color" title="この色の点を全削除" class="px-2 py-1 rounded bg-rose-950/40 hover:bg-rose-900 text-rose-300 text-[10px] border border-rose-800/50 transition">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- チェックリスト表示エリア (ここだけが独立して縦スクロールする) -->
+      <div id="checklist-scroll-area" class="flex-1 overflow-y-auto sidebar-scroll p-2 space-y-1.5 min-h-0">
+        <!-- JSで動的に追加されるチェックボックス行 -->
+      </div>
+
+      <!-- サイドバー最下部: 直前削除ボタン -->
+      <div class="p-2.5 border-t border-slate-800 bg-slate-900 flex-shrink-0">
+        <button id="btn-delete-last" class="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium border border-slate-700 transition flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-delete-left text-amber-400"></i> 直前の打点を削除 (右クリック)
+        </button>
+      </div>
+
+    </aside>
+
+  </div>
+
+  <!-- トースト通知 -->
+  <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- ================= 3. アプリケーションロジック ================= -->
+  <script>
+    (() => {
+      // 6色のカラーパレット定義（赤、青、緑、黄、紫、黒）
+      const COLOR_PRESETS = [
+        { id: 0, name: '赤', color: '#ef4444', ring: '#fee2e2', textColor: '#ffffff' },
+        { id: 1, name: '青', color: '#3b82f6', ring: '#dbeafe', textColor: '#ffffff' },
+        { id: 2, name: '緑', color: '#10b981', ring: '#d1fae5', textColor: '#ffffff' },
+        { id: 3, name: '黄', color: '#f59e0b', ring: '#fef3c7', textColor: '#000000' },
+        { id: 4, name: '紫', color: '#a855f7', ring: '#f3e8ff', textColor: '#ffffff' },
+        { id: 5, name: '黒', color: '#090d16', ring: '#ffffff', textColor: '#ffffff' }, // 黒は白の縁取りリング
+      ];
+
+      // アプリケーション状態
+      const state = {
+        image: null,
+        imgWidth: 0,
+        imgHeight: 0,
+        currentTool: 'mark', // 'mark' | 'pan'
+        activeColorId: 0,    // 0〜5
+        showNumbers: true,   // 番号表示 ON/OFF
+        markerRadius: 8,     // 点の大きさ
+        categories: COLOR_PRESETS.map(c => ({
+          id: c.id,
+          name: c.name,
+          color: c.color,
+          ring: c.ring,
+          textColor: c.textColor,
+          counterSeq: 0
+        })),
+        markers: [],         // { id, colorId, seqNum, x, y, checked }
+        hoveredMarkerId: null,
+
+        // ズーム & パン
+        scale: 1,
+        panX: 0,
+        panY: 0,
+        isPanning: false,
+        startX: 0,
+        startY: 0,
+        mouseImgX: 0,
+        mouseImgY: 0,
+        isMouseInside: false,
+
+        // 履歴 (Undo/Redo)
+        history: [],
+        historyIndex: -1,
+      };
+
+      // DOM参照
+      const canvas = document.getElementById('main-canvas');
+      const ctx = canvas.getContext('2d');
+      const viewport = document.getElementById('viewport-container');
+      const emptyState = document.getElementById('empty-state');
+      const inputImage = document.getElementById('input-image');
+      const btnLoadSample = document.getElementById('btn-load-sample');
+
+      const toolMark = document.getElementById('tool-mark');
+      const toolPan = document.getElementById('tool-pan');
+      const btnToggleNumbers = document.getElementById('btn-toggle-numbers');
+      const iconToggleNumbers = document.getElementById('icon-toggle-numbers');
+      const textToggleNumbers = document.getElementById('text-toggle-numbers');
+
+      const btnZoomIn = document.getElementById('btn-zoom-in');
+      const btnZoomOut = document.getElementById('btn-zoom-out');
+      const btnZoomFit = document.getElementById('btn-zoom-fit');
+      const zoomText = document.getElementById('zoom-text');
+
+      const paletteButtons = document.getElementById('palette-buttons');
+      const inputPointSize = document.getElementById('input-point-size');
+      const labelPointSize = document.getElementById('label-point-size');
+
+      const headerTotalValid = document.getElementById('header-total-valid');
+      const headerTotalAll = document.getElementById('header-total-all');
+      const btnUndo = document.getElementById('btn-undo');
+      const btnRedo = document.getElementById('btn-redo');
+      const btnExportCsv = document.getElementById('btn-export-csv');
+      const btnExportImage = document.getElementById('btn-export-image');
+
+      const categoryTabs = document.getElementById('category-tabs');
+      const badgeColorPreview = document.getElementById('badge-color-preview');
+      const inputCatName = document.getElementById('input-cat-name');
+      const labelCatValid = document.getElementById('label-cat-valid');
+      const labelCatTotal = document.getElementById('label-cat-total');
+      const btnBatchCheck = document.getElementById('btn-batch-check');
+      const btnBatchUncheck = document.getElementById('btn-batch-uncheck');
+      const btnClearColor = document.getElementById('btn-clear-color');
+      const checklistScrollArea = document.getElementById('checklist-scroll-area');
+      const btnDeleteLast = document.getElementById('btn-delete-last');
+
+      const statusCursor = document.getElementById('status-cursor');
+      const statusActiveColor = document.getElementById('status-active-color');
+
+      // 初期化
+      init();
+
+      function init() {
+        buildPaletteButtons();
+        buildCategoryTabs();
+        setupEvents();
+        updateUndoRedoUI();
+        updateCountsAndChecklist(false);
+
+        // ウィンドウリサイズ対応
+        window.addEventListener('resize', () => {
+          resizeCanvas();
+          render();
+        });
+      }
+
+      function resizeCanvas() {
+        const rect = viewport.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+      }
+
+      // 6色パレットボタン生成
+      function buildPaletteButtons() {
+        paletteButtons.innerHTML = '';
+        state.categories.forEach(cat => {
+          const btn = document.createElement('button');
+          const isSelected = state.activeColorId === cat.id;
+          btn.className = `w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] transition transform ${
+            isSelected ? 'ring-2 ring-white scale-110 shadow-lg' : 'opacity-70 hover:opacity-100 hover:scale-105'
+          }`;
+          btn.style.backgroundColor = cat.color;
+          btn.style.color = cat.textColor;
+          if (cat.id === 5) {
+            btn.style.border = '1.5px solid #ffffff'; // 黒ボタンの縁取り
+          }
+          btn.textContent = cat.id + 1;
+          btn.title = `${cat.name} (${cat.id + 1}キー)`;
+
+          btn.addEventListener('click', () => selectColor(cat.id));
+          paletteButtons.appendChild(btn);
+        });
+
+        const activeCat = state.categories[state.activeColorId];
+        badgeColorPreview.style.backgroundColor = activeCat.color;
+        if (activeCat.id === 5) badgeColorPreview.style.border = '1px solid #ffffff';
+        else badgeColorPreview.style.border = 'none';
+        inputCatName.value = activeCat.name;
+        statusActiveColor.textContent = `選択中: ${activeCat.name}`;
+      }
+
+      // サイドバーの6色タブ生成
+      function buildCategoryTabs() {
+        categoryTabs.innerHTML = '';
+        state.categories.forEach(cat => {
+          const tab = document.createElement('button');
+          const isSelected = state.activeColorId === cat.id;
+          const validCount = state.markers.filter(m => m.colorId === cat.id && m.checked).length;
+
+          tab.className = `flex flex-col items-center py-1 rounded-lg transition ${
+            isSelected ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`;
+
+          tab.innerHTML = `
+            <div class="w-2.5 h-2.5 rounded-full mb-0.5 ${cat.id === 5 ? 'border border-white' : ''}" style="background-color: ${cat.color};"></div>
+            <span class="text-[9px] font-bold truncate max-w-[40px]">${cat.name}</span>
+            <span class="text-[9px] font-mono font-bold text-emerald-400">${validCount}</span>
+          `;
+
+          tab.addEventListener('click', () => selectColor(cat.id));
+          categoryTabs.appendChild(tab);
+        });
+      }
+
+      function selectColor(colorId) {
+        state.activeColorId = colorId;
+        buildPaletteButtons();
+        buildCategoryTabs();
+        updateCountsAndChecklist(false);
+        render();
+      }
+
+      // イベント設定
+      function setupEvents() {
+        // 画像読み込み
+        inputImage.addEventListener('change', (e) => {
+          if (e.target.files && e.target.files[0]) {
+            loadImage(e.target.files[0]);
+          }
+        });
+
+        // ドラッグ＆ドロップ (ブラウザのデフォルトページ遷移を完全防止)
+        viewport.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        viewport.addEventListener('drop', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            loadImage(e.dataTransfer.files[0]);
+          }
+        });
+
+        // サンプル画像生成
+        btnLoadSample.addEventListener('click', loadSampleImage);
+
+        // モード切替
+        toolMark.addEventListener('click', () => setTool('mark'));
+        toolPan.addEventListener('click', () => setTool('pan'));
+
+        // 番号の表示 / 非表示トグル
+        btnToggleNumbers.addEventListener('click', toggleNumberVisibility);
+
+        // ズームボタン
+        btnZoomIn.addEventListener('click', () => zoomAtCenter(1.25));
+        btnZoomOut.addEventListener('click', () => zoomAtCenter(0.8));
+        btnZoomFit.addEventListener('click', zoomToFit);
+
+        // 点サイズ スライダー & プリセット
+        inputPointSize.addEventListener('input', (e) => {
+          setPointSize(parseInt(e.target.value, 10));
+        });
+        document.querySelectorAll('.btn-preset-size').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const size = parseInt(btn.getAttribute('data-size'), 10);
+            setPointSize(size);
+          });
+        });
+
+        // マウスホイール (ズーム / Alt+ホイールで点サイズ変更)
+        viewport.addEventListener('wheel', handleWheel, { passive: false });
+
+        // マウス移動・打点・パン操作
+        viewport.addEventListener('mousedown', handleMouseDown);
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+        viewport.addEventListener('mouseleave', () => {
+          state.isMouseInside = false;
+          render();
+        });
+
+        // 右クリックでの削除
+        viewport.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          deleteLastMarker();
+        });
+
+        // Undo / Redo / 削除ボタン
+        btnUndo.addEventListener('click', undo);
+        btnRedo.addEventListener('click', redo);
+        btnDeleteLast.addEventListener('click', deleteLastMarker);
+
+        // カテゴリ名編集
+        inputCatName.addEventListener('change', (e) => {
+          const name = e.target.value.trim() || `色 ${state.activeColorId + 1}`;
+          state.categories[state.activeColorId].name = name;
+          buildCategoryTabs();
+          buildPaletteButtons();
+        });
+
+        // 一括ON / OFF / 全削除
+        btnBatchCheck.addEventListener('click', () => setBatchCheck(true));
+        btnBatchUncheck.addEventListener('click', () => setBatchCheck(false));
+        btnClearColor.addEventListener('click', clearCurrentColorMarkers);
+
+        // キーボードショートカット
+        window.addEventListener('keydown', handleKeyDown);
+
+        // エクスポート
+        btnExportCsv.addEventListener('click', exportCSV);
+        btnExportImage.addEventListener('click', exportImage);
+      }
+
+      function setPointSize(size) {
+        state.markerRadius = Math.max(2, Math.min(32, size));
+        inputPointSize.value = state.markerRadius;
+        labelPointSize.textContent = state.markerRadius;
+        render();
+      }
+
+      function toggleNumberVisibility() {
+        state.showNumbers = !state.showNumbers;
+        if (state.showNumbers) {
+          iconToggleNumbers.className = 'fa-solid fa-eye text-emerald-400 text-[11px]';
+          textToggleNumbers.textContent = '番号: ON';
+          btnToggleNumbers.classList.remove('bg-rose-950/40', 'border-rose-800');
+        } else {
+          iconToggleNumbers.className = 'fa-solid fa-eye-slash text-slate-400 text-[11px]';
+          textToggleNumbers.textContent = '番号: OFF';
+          btnToggleNumbers.classList.add('bg-rose-950/40', 'border-rose-800');
+        }
+        render();
+        showToast(`番号ラベルを ${state.showNumbers ? '表示' : '非表示'} にしました`);
+      }
+
+      function setTool(tool) {
+        state.currentTool = tool;
+        if (tool === 'mark') {
+          toolMark.className = "px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow transition";
+          toolPan.className = "px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent transition";
+          viewport.style.cursor = 'crosshair';
+        } else {
+          toolPan.className = "px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow transition";
+          toolMark.className = "px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent transition";
+          viewport.style.cursor = 'grab';
+        }
+      }
+
+      // 画像読み込み
+      function loadImage(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            initImageState(img);
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      }
+
+      function loadSampleImage() {
+        const sCanvas = document.createElement('canvas');
+        const size = 1200;
+        sCanvas.width = size;
+        sCanvas.height = size;
+        const sCtx = sCanvas.getContext('2d');
+
+        // 実験台背景
+        sCtx.fillStyle = '#0b0f19';
+        sCtx.fillRect(0, 0, size, size);
+
+        const cx = size / 2;
+        const cy = size / 2;
+        const r = size * 0.42;
+
+        // シャーレ外枠
+        sCtx.beginPath();
+        sCtx.arc(cx, cy, r + 16, 0, Math.PI * 2);
+        sCtx.fillStyle = '#1e293b';
+        sCtx.fill();
+
+        // 寒天
+        const grad = sCtx.createRadialGradient(cx - 50, cy - 50, 40, cx, cy, r);
+        grad.addColorStop(0, '#64748b');
+        grad.addColorStop(0.7, '#475569');
+        grad.addColorStop(1, '#334155');
+        sCtx.beginPath();
+        sCtx.arc(cx, cy, r, 0, Math.PI * 2);
+        sCtx.fillStyle = grad;
+        sCtx.fill();
+
+        // ガラス縁
+        sCtx.strokeStyle = 'rgba(255,255,255,0.25)';
+        sCtx.lineWidth = 4;
+        sCtx.stroke();
+
+        // コロニー配置
+        for (let i = 0; i < 220; i++) {
+          const cr = Math.sqrt(Math.random()) * (r - 40);
+          const theta = Math.random() * Math.PI * 2;
+          const px = cx + cr * Math.cos(theta);
+          const py = cy + cr * Math.sin(theta);
+          const cSize = 3 + Math.random() * 4.5;
+          const isBlue = Math.random() < 0.18;
+
+          sCtx.beginPath();
+          sCtx.arc(px, py, cSize, 0, Math.PI * 2);
+          if (isBlue) {
+            sCtx.fillStyle = '#06b6d4';
+          } else {
+            sCtx.fillStyle = '#f8fafc';
+          }
+          sCtx.fill();
+        }
+
+        const img = new Image();
+        img.onload = () => initImageState(img);
+        img.src = sCanvas.toDataURL('image/png');
+      }
+
+      function initImageState(img) {
+        state.image = img;
+        state.imgWidth = img.width;
+        state.imgHeight = img.height;
+        emptyState.classList.add('hidden');
+
+        // リセット
+        state.markers = [];
+        state.categories.forEach(c => c.counterSeq = 0);
+        state.history = [];
+        state.historyIndex = -1;
+        recordHistory('初期状態');
+
+        resizeCanvas();
+        zoomToFit();
+        updateCountsAndChecklist(false);
+        showToast('画像を読み込みました');
+      }
+
+      function zoomToFit() {
+        if (!state.image) return;
+        resizeCanvas();
+        const rect = viewport.getBoundingClientRect();
+        const pad = 40;
+        const scaleX = (rect.width - pad) / state.imgWidth;
+        const scaleY = (rect.height - pad) / state.imgHeight;
+        state.scale = Math.min(scaleX, scaleY, 1.2);
+        state.scale = Math.max(0.05, state.scale);
+
+        state.panX = (rect.width - state.imgWidth * state.scale) / 2;
+        state.panY = (rect.height - state.imgHeight * state.scale) / 2;
+        render();
+      }
+
+      function zoomAtCenter(factor) {
+        if (!state.image) return;
+        const rect = viewport.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        applyZoom(factor, cx, cy);
+      }
+
+      function applyZoom(factor, pivotX, pivotY) {
+        const oldScale = state.scale;
+        const newScale = Math.min(15, Math.max(0.05, oldScale * factor));
+        const ratio = newScale / oldScale;
+
+        state.panX = pivotX - (pivotX - state.panX) * ratio;
+        state.panY = pivotY - (pivotY - state.panY) * ratio;
+        state.scale = newScale;
+        render();
+      }
+
+      function handleWheel(e) {
+        e.preventDefault(); // 画面全体のスクロールを絶対阻止
+        if (!state.image) return;
+
+        // Altキー押下で点サイズ調整
+        if (e.altKey) {
+          const delta = e.deltaY < 0 ? 1 : -1;
+          setPointSize(state.markerRadius + delta);
+          return;
+        }
+
+        // ホイールによるズーム
+        const rect = viewport.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const factor = e.deltaY < 0 ? 1.15 : 0.87;
+        applyZoom(factor, mx, my);
+      }
+
+      function handleMouseDown(e) {
+        if (!state.image) return;
+
+        // ホイールクリック or Spaceキー長押し or 移動ツール
+        const isMiddle = e.button === 1;
+        const isSpace = e.getModifierState && e.getModifierState('Space');
+
+        if (state.currentTool === 'pan' || isMiddle || isSpace) {
+          state.isPanning = true;
+          state.startX = e.clientX;
+          state.startY = e.clientY;
+          viewport.style.cursor = 'grabbing';
+          return;
+        }
+
+        // 打点 (左クリック)
+        if (e.button === 0 && state.currentTool === 'mark') {
+          const rect = viewport.getBoundingClientRect();
+          const mx = e.clientX - rect.left;
+          const my = e.clientY - rect.top;
+
+          const imgX = (mx - state.panX) / state.scale;
+          const imgY = (my - state.panY) / state.scale;
+
+          // 画像内か確認
+          if (imgX >= 0 && imgX <= state.imgWidth && imgY >= 0 && imgY <= state.imgHeight) {
+            addMarker(imgX, imgY);
+          }
+        }
+      }
+
+      function handleMouseMove(e) {
+        const rect = viewport.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        if (state.isPanning) {
+          state.panX += (e.clientX - state.startX);
+          state.panY += (e.clientY - state.startY);
+          state.startX = e.clientX;
+          state.startY = e.clientY;
+          render();
+          return;
+        }
+
+        if (!state.image) return;
+
+        state.isMouseInside = (mx >= 0 && mx <= rect.width && my >= 0 && my <= rect.height);
+        state.mouseImgX = (mx - state.panX) / state.scale;
+        state.mouseImgY = (my - state.panY) / state.scale;
+
+        if (state.mouseImgX >= 0 && state.mouseImgX <= state.imgWidth && state.mouseImgY >= 0 && state.mouseImgY <= state.imgHeight) {
+          statusCursor.textContent = `X: ${Math.round(state.mouseImgX)}, Y: ${Math.round(state.mouseImgY)}`;
+        } else {
+          statusCursor.textContent = `X: --, Y: --`;
+        }
+
+        // 打点モードなら照準円を追従再描画
+        if (state.currentTool === 'mark') {
+          render();
+        }
+      }
+
+      function handleMouseUp() {
+        if (state.isPanning) {
+          state.isPanning = false;
+          viewport.style.cursor = state.currentTool === 'pan' ? 'grab' : 'crosshair';
+        }
+      }
+
+      function handleKeyDown(e) {
+        if (e.target.tagName === 'INPUT') return;
+
+        // 1〜6 でカラー選択
+        if (e.key >= '1' && e.key <= '6') {
+          selectColor(parseInt(e.key, 10) - 1);
+          return;
+        }
+
+        // N キーで番号表示/非表示
+        if (e.key.toLowerCase() === 'n') {
+          toggleNumberVisibility();
+          return;
+        }
+
+        // [ / ] で点サイズ調整
+        if (e.key === '[') setPointSize(state.markerRadius - 1);
+        if (e.key === ']') setPointSize(state.markerRadius + 1);
+
+        // Undo / Redo
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) redo();
+          else undo();
+          return;
+        } else if (e.key.toLowerCase() === 'z' && !e.ctrlKey && !e.metaKey) {
+          undo();
+          return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+          e.preventDefault();
+          redo();
+          return;
+        } else if (e.key.toLowerCase() === 'y' && !e.ctrlKey && !e.metaKey) {
+          redo();
+          return;
+        }
+
+        // M (Mark), H / P (Pan)
+        if (e.key.toLowerCase() === 'm') setTool('mark');
+        if (e.key.toLowerCase() === 'h' || e.key.toLowerCase() === 'p') setTool('pan');
+      }
+
+      // 打点処理
+      function addMarker(x, y) {
+        const cat = state.categories[state.activeColorId];
+        cat.counterSeq += 1;
+
+        const newMarker = {
+          id: 'm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+          colorId: state.activeColorId,
+          seqNum: cat.counterSeq,
+          x: Math.round(x),
+          y: Math.round(y),
+          checked: true,
+        };
+
+        state.markers.push(newMarker);
+        recordHistory(`打点 #${newMarker.seqNum}`);
+        
+        // サイドバーリスト更新（末尾へスクロール）
+        updateCountsAndChecklist(true);
+        render();
+      }
+
+      function deleteLastMarker() {
+        if (state.markers.length === 0) return;
+        const last = state.markers.pop();
+        recordHistory(`削除 #${last.seqNum}`);
+        updateCountsAndChecklist(false);
+        render();
+        showToast(`打点 #${last.seqNum} を削除しました`);
+      }
+
+      function deleteMarkerById(id) {
+        const idx = state.markers.findIndex(m => m.id === id);
+        if (idx !== -1) {
+          const removed = state.markers.splice(idx, 1)[0];
+          recordHistory(`削除 #${removed.seqNum}`);
+          updateCountsAndChecklist(false);
+          render();
+        }
+      }
+
+      function toggleCheck(id, isChecked) {
+        const m = state.markers.find(item => item.id === id);
+        if (m) {
+          m.checked = isChecked;
+          recordHistory(`チェック #${m.seqNum} ${isChecked ? 'ON' : 'OFF'}`);
+          updateCountsAndChecklist(false);
+          render();
+        }
+      }
+
+      function setBatchCheck(checked) {
+        let changed = false;
+        state.markers.forEach(m => {
+          if (m.colorId === state.activeColorId && m.checked !== checked) {
+            m.checked = checked;
+            changed = true;
+          }
+        });
+        if (changed) {
+          recordHistory(`一括${checked ? 'ON' : 'OFF'}`);
+          updateCountsAndChecklist(false);
+          render();
+        }
+      }
+
+      function clearCurrentColorMarkers() {
+        const beforeLen = state.markers.length;
+        state.markers = state.markers.filter(m => m.colorId !== state.activeColorId);
+        if (state.markers.length !== beforeLen) {
+          recordHistory('色全消去');
+          updateCountsAndChecklist(false);
+          render();
+          showToast('この色のマーカーを全消去しました');
+        }
+      }
+
+      // 履歴管理
+      function recordHistory(desc) {
+        state.history = state.history.slice(0, state.historyIndex + 1);
+        state.history.push({
+          desc,
+          markers: JSON.parse(JSON.stringify(state.markers)),
+          seqs: state.categories.map(c => c.counterSeq)
+        });
+        state.historyIndex++;
+        if (state.history.length > 50) {
+          state.history.shift();
+          state.historyIndex--;
+        }
+        updateUndoRedoUI();
+      }
+
+      function undo() {
+        if (state.historyIndex > 0) {
+          state.historyIndex--;
+          applyHistory(state.history[state.historyIndex]);
+          showToast(`元に戻す`);
+        }
+      }
+
+      function redo() {
+        if (state.historyIndex < state.history.length - 1) {
+          state.historyIndex++;
+          applyHistory(state.history[state.historyIndex]);
+          showToast(`やり直す`);
+        }
+      }
+
+      function applyHistory(snap) {
+        state.markers = JSON.parse(JSON.stringify(snap.markers));
+        snap.seqs.forEach((s, i) => {
+          if (state.categories[i]) state.categories[i].counterSeq = s;
+        });
+        updateUndoRedoUI();
+        updateCountsAndChecklist(false);
+        render();
+      }
+
+      function updateUndoRedoUI() {
+        btnUndo.disabled = state.historyIndex <= 0;
+        btnRedo.disabled = state.historyIndex >= state.history.length - 1;
+      }
+
+      // カウント集計 & サイドバーリスト描画
+      // autoScrollToEnd: true の場合、サイドバーのスクロール領域内のみを最下部へ移動
+      function updateCountsAndChecklist(autoScrollToEnd = false) {
+        const totalValid = state.markers.filter(m => m.checked).length;
+        headerTotalValid.textContent = totalValid;
+        headerTotalAll.textContent = state.markers.length;
+
+        const currentMarkers = state.markers.filter(m => m.colorId === state.activeColorId);
+        const currentValid = currentMarkers.filter(m => m.checked).length;
+
+        labelCatValid.textContent = currentValid;
+        labelCatTotal.textContent = currentMarkers.length;
+
+        buildCategoryTabs();
+
+        // チェックリスト生成
+        checklistScrollArea.innerHTML = '';
+        if (currentMarkers.length === 0) {
+          checklistScrollArea.innerHTML = `
+            <div class="h-44 flex flex-col items-center justify-center text-slate-500 text-xs text-center p-4">
+              <i class="fa-solid fa-feather-pointed text-2xl mb-2 text-slate-600"></i>
+              <span>画像上をクリックして<br>打点と番号を登録してください</span>
+            </div>
+          `;
+          return;
+        }
+
+        const activeCat = state.categories[state.activeColorId];
+
+        currentMarkers.forEach(m => {
+          const row = document.createElement('div');
+          row.id = `row-${m.id}`;
+          row.className = `group flex items-center justify-between p-2 rounded-lg text-xs transition border ${
+            m.checked ? 'bg-slate-800/80 border-slate-700/80 hover:bg-slate-800' : 'bg-slate-900/40 border-slate-800/40 opacity-50 hover:opacity-100'
+          }`;
+
+          row.innerHTML = `
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="chk-${m.id}" ${m.checked ? 'checked' : ''} class="w-3.5 h-3.5 rounded text-emerald-500 bg-slate-900 border-slate-700 focus:ring-0 cursor-pointer">
+              <div class="flex items-center gap-1.5 cursor-pointer" id="label-${m.id}">
+                <span class="w-2.5 h-2.5 rounded-full inline-block ${m.colorId === 5 ? 'border border-white' : ''}" style="background-color: ${activeCat.color};"></span>
+                <span class="font-mono font-bold ${m.checked ? 'text-white' : 'text-slate-400 line-through'}">#${m.seqNum}</span>
+                <span class="text-[10px] text-slate-500 font-mono">(${m.x}, ${m.y})</span>
+              </div>
+            </div>
+            <button class="btn-del-row w-5 h-5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition" title="削除">
+              <i class="fa-solid fa-xmark text-[11px]"></i>
+            </button>
+          `;
+
+          // チェック連動
+          row.querySelector(`#chk-${m.id}`).addEventListener('change', (e) => {
+            toggleCheck(m.id, e.target.checked);
+          });
+
+          // ホバーハイライト
+          row.addEventListener('mouseenter', () => {
+            state.hoveredMarkerId = m.id;
+            render();
+          });
+          row.addEventListener('mouseleave', () => {
+            state.hoveredMarkerId = null;
+            render();
+          });
+
+          // クリックでコロニーにセンタリング
+          row.querySelector(`#label-${m.id}`).addEventListener('click', () => {
+            focusColony(m);
+          });
+
+          // 削除
+          row.querySelector('.btn-del-row').addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteMarkerById(m.id);
+          });
+
+          checklistScrollArea.appendChild(row);
+        });
+
+        // 画面全体のスクロールを引き起こさないよう、サイドバーコンテナ内部のscrollTopのみを更新
+        if (autoScrollToEnd) {
+          checklistScrollArea.scrollTop = checklistScrollArea.scrollHeight;
+        }
+      }
+
+      function focusColony(m) {
+        const rect = viewport.getBoundingClientRect();
+        state.panX = (rect.width / 2) - (m.x * state.scale);
+        state.panY = (rect.height / 2) - (m.y * state.scale);
+        state.hoveredMarkerId = m.id;
+        render();
+        setTimeout(() => {
+          if (state.hoveredMarkerId === m.id) {
+            state.hoveredMarkerId = null;
+            render();
+          }
+        }, 1200);
+      }
+
+      // レンダリング (メインCanvas描画)
+      function render() {
+        if (!state.image) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        ctx.translate(state.panX, state.panY);
+        ctx.scale(state.scale, state.scale);
+
+        // 原画像描画
+        ctx.drawImage(state.image, 0, 0, state.imgWidth, state.imgHeight);
+
+        // 画像枠
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1 / state.scale;
+        ctx.strokeRect(0, 0, state.imgWidth, state.imgHeight);
+
+        // 全マーカー描画
+        state.markers.forEach(m => {
+          drawMarker(ctx, m, state.scale, false);
+        });
+
+        // 打点モード時のマウス照準サークル（プレビュー）
+        if (state.currentTool === 'mark' && state.isMouseInside) {
+          drawCrosshairPreview(ctx);
+        }
+
+        ctx.restore();
+
+        zoomText.textContent = `${Math.round(state.scale * 100)}%`;
+      }
+
+      function drawCrosshairPreview(targetCtx) {
+        const mx = state.mouseImgX;
+        const my = state.mouseImgY;
+        const r = state.markerRadius;
+        const cat = state.categories[state.activeColorId];
+
+        targetCtx.save();
+        targetCtx.beginPath();
+        targetCtx.arc(mx, my, r, 0, Math.PI * 2);
+        targetCtx.fillStyle = cat.color + '40'; // 半透明
+        targetCtx.fill();
+        targetCtx.lineWidth = 1.5 / state.scale;
+        targetCtx.strokeStyle = cat.id === 5 ? '#ffffff' : cat.color;
+        targetCtx.stroke();
+
+        // 十字線
+        targetCtx.beginPath();
+        targetCtx.moveTo(mx - r * 1.6, my);
+        targetCtx.lineTo(mx + r * 1.6, my);
+        targetCtx.moveTo(mx, my - r * 1.6);
+        targetCtx.lineTo(mx, my + r * 1.6);
+        targetCtx.lineWidth = 1 / state.scale;
+        targetCtx.strokeStyle = 'rgba(255,255,255,0.7)';
+        targetCtx.stroke();
+        targetCtx.restore();
+      }
+
+      function drawMarker(targetCtx, m, currentScale = 1, isExport = false) {
+        const cat = state.categories[m.colorId] || state.categories[0];
+        const isHovered = (m.id === state.hoveredMarkerId);
+
+        targetCtx.save();
+
+        if (!m.checked) {
+          targetCtx.globalAlpha = 0.35; // 無効マーカーは半透明
+        }
+
+        // 点サイズ（等倍出力時は固定）
+        const r = state.markerRadius;
+        const strokeW = Math.max(1.2, r * 0.25);
+
+        // 1. 中心マーカー（打点）
+        targetCtx.beginPath();
+        targetCtx.arc(m.x, m.y, r, 0, Math.PI * 2);
+        targetCtx.fillStyle = cat.color;
+        targetCtx.fill();
+
+        // 外周縁取り（黒マーカーは白、その他は高コントラスト）
+        targetCtx.lineWidth = strokeW;
+        targetCtx.strokeStyle = cat.id === 5 ? '#ffffff' : '#0f172a';
+        targetCtx.stroke();
+
+        // ホバーハイライト
+        if (isHovered && !isExport) {
+          targetCtx.beginPath();
+          targetCtx.arc(m.x, m.y, r * 2.2, 0, Math.PI * 2);
+          targetCtx.lineWidth = 2.5 / currentScale;
+          targetCtx.strokeStyle = '#38bdf8';
+          targetCtx.stroke();
+        }
+
+        // 2. 右上の番号表示（state.showNumbers が true の場合のみ描画）
+        if (state.showNumbers) {
+          const fontSize = Math.max(10, Math.round(r * 1.3));
+          targetCtx.font = `bold ${fontSize}px sans-serif`;
+
+          const text = `${m.seqNum}`;
+          const metrics = targetCtx.measureText(text);
+          const tw = metrics.width;
+          const th = fontSize;
+
+          // 打点の右上オフセット
+          const bx = m.x + r * 1.1;
+          const by = m.y - r * 0.9;
+
+          // 背景ピル
+          const padX = fontSize * 0.35;
+          const padY = fontSize * 0.2;
+          const bw = tw + padX * 2;
+          const bh = th + padY * 2;
+
+          targetCtx.beginPath();
+          targetCtx.rect(bx, by - th, bw, bh);
+          targetCtx.fillStyle = m.checked ? 'rgba(15, 23, 42, 0.88)' : 'rgba(30, 41, 59, 0.65)';
+          targetCtx.fill();
+
+          targetCtx.lineWidth = 1;
+          targetCtx.strokeStyle = m.checked ? (cat.id === 5 ? '#ffffff' : cat.color) : '#64748b';
+          targetCtx.stroke();
+
+          // テキスト描画
+          targetCtx.fillStyle = m.checked ? '#ffffff' : '#94a3b8';
+          targetCtx.textBaseline = 'middle';
+          targetCtx.fillText(text, bx + padX, by - (th / 2) + padY * 0.2);
+        }
+
+        targetCtx.restore();
+      }
+
+      // CSVエクスポート
+      function exportCSV() {
+        if (state.markers.length === 0) {
+          showToast('エクスポートするデータがありません');
+          return;
+        }
+
+        let csv = '\uFEFF';
+        csv += 'ID,Category,Color,Number,Status,X,Y\n';
+        state.markers.forEach(m => {
+          const cat = state.categories[m.colorId] || state.categories[0];
+          csv += `"${m.id}","${cat.name}","${cat.color}",${m.seqNum},"${m.checked ? 'Valid' : 'Excluded'}",${m.x},${m.y}\n`;
+        });
+
+        csv += '\n--- SUMMARY ---\n';
+        csv += 'Category,ValidCount,TotalCount\n';
+        state.categories.forEach(cat => {
+          const catM = state.markers.filter(m => m.colorId === cat.id);
+          csv += `"${cat.name}",${catM.filter(m => m.checked).length},${catM.length}\n`;
+        });
+        csv += `"Grand Total",${state.markers.filter(m => m.checked).length},${state.markers.length}\n`;
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `colony_count_${Date.now()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('CSVを保存しました');
+      }
+
+      // 画像エクスポート
+      function exportImage() {
+        if (!state.image) {
+          showToast('画像が読み込まれていません');
+          return;
+        }
+
+        showToast('画像をレンダリング中...');
+        setTimeout(() => {
+          const out = document.createElement('canvas');
+          out.width = state.imgWidth;
+          out.height = state.imgHeight;
+          const oCtx = out.getContext('2d');
+
+          // 元画像
+          oCtx.drawImage(state.image, 0, 0);
+
+          // マーカーを焼き込み
+          state.markers.forEach(m => {
+            drawMarker(oCtx, m, 1, true);
+          });
+
+          // ウォーターマーク
+          const totalValid = state.markers.filter(m => m.checked).length;
+          const text = `BioMarker Count: ${totalValid} / ${state.markers.length}`;
+          oCtx.font = 'bold 22px monospace';
+          const tw = oCtx.measureText(text).width;
+          oCtx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+          oCtx.fillRect(state.imgWidth - tw - 30, state.imgHeight - 45, tw + 20, 35);
+          oCtx.fillStyle = '#10b981';
+          oCtx.fillText(text, state.imgWidth - tw - 20, state.imgHeight - 20);
+
+          const a = document.createElement('a');
+          a.href = out.toDataURL('image/png');
+          a.download = `colony_counted_${Date.now()}.png`;
+          a.click();
+          showToast('結果画像を保存しました');
+        }, 60);
+      }
+
+      // トースト
+      function showToast(msg) {
+        const toast = document.createElement('div');
+        toast.className = 'bg-slate-800 text-white text-xs px-3 py-2 rounded-lg border border-slate-700 shadow-xl flex items-center gap-2 transform transition-all duration-200 opacity-0 translate-y-2';
+        toast.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400"></i><span>${msg}</span>`;
+        document.getElementById('toast-container').appendChild(toast);
+
+        requestAnimationFrame(() => {
+          toast.classList.remove('opacity-0', 'translate-y-2');
+        });
+
+        setTimeout(() => {
+          toast.classList.add('opacity-0', 'translate-y-2');
+          setTimeout(() => toast.remove(), 250);
+        }, 1800);
+      }
+
+    })();
+  </script>
+</body>
+</html>
